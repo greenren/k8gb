@@ -15,8 +15,8 @@ import (
 )
 
 type InfobloxProvider struct {
-	assistant assistant.IAssistant
-	config    depresolver.Config
+	assistant  assistant.IAssistant
+	config     depresolver.Config
 	connection *ibclient.ObjectManager
 }
 
