@@ -11,7 +11,6 @@ import (
 	k8gbv1beta1 "github.com/AbsaOSS/k8gb/api/v1beta1"
 	"github.com/AbsaOSS/k8gb/controllers/depresolver"
 	ibclient "github.com/infobloxopen/infoblox-go-client"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 type InfobloxProvider struct {
@@ -26,14 +25,14 @@ func NewInfobloxDNS(config depresolver.Config, assistant assistant.IAssistant) *
 	}
 }
 
-func (p *InfobloxProvider) CreateZoneDelegationForExternalDNS(gslb *k8gbv1beta1.Gslb) (*reconcile.Result, error) {
+func (p *InfobloxProvider) CreateZoneDelegationForExternalDNS(gslb *k8gbv1beta1.Gslb) error {
 	objMgr, err := p.infobloxConnection()
 	if err != nil {
-		return &reconcile.Result{}, err
+		return err
 	}
 	addresses, err := p.assistant.GslbIngressExposedIPs(gslb)
 	if err != nil {
-		return &reconcile.Result{}, err
+		return err
 	}
 	var delegateTo []ibclient.NameServer
 
@@ -44,13 +43,13 @@ func (p *InfobloxProvider) CreateZoneDelegationForExternalDNS(gslb *k8gbv1beta1.
 
 	findZone, err := objMgr.GetZoneDelegated(p.config.DNSZone)
 	if err != nil {
-		return &reconcile.Result{}, err
+		return err
 	}
 
 	if findZone != nil {
 		err = p.checkZoneDelegated(findZone)
 		if err != nil {
-			return &reconcile.Result{}, err
+			return err
 		}
 		if len(findZone.Ref) > 0 {
 
@@ -76,14 +75,14 @@ func (p *InfobloxProvider) CreateZoneDelegationForExternalDNS(gslb *k8gbv1beta1.
 
 			_, err = objMgr.UpdateZoneDelegated(findZone.Ref, existingDelegateTo)
 			if err != nil {
-				return &reconcile.Result{}, err
+				return err
 			}
 		}
 	} else {
 		p.assistant.Info("Creating delegated zone(%s)...", p.config.DNSZone)
 		_, err = objMgr.CreateZoneDelegated(p.config.DNSZone, delegateTo)
 		if err != nil {
-			return &reconcile.Result{}, err
+			return err
 		}
 	}
 
@@ -91,22 +90,22 @@ func (p *InfobloxProvider) CreateZoneDelegationForExternalDNS(gslb *k8gbv1beta1.
 	heartbeatTXTName := fmt.Sprintf("%s-heartbeat-%s.%s", gslb.Name, p.config.ClusterGeoTag, p.config.EdgeDNSZone)
 	heartbeatTXTRecord, err := objMgr.GetTXTRecord(heartbeatTXTName)
 	if err != nil {
-		return &reconcile.Result{}, err
+		return err
 	}
 	if heartbeatTXTRecord == nil {
 		p.assistant.Info("Creating split brain TXT record(%s)...", heartbeatTXTName)
 		_, err := objMgr.CreateTXTRecord(heartbeatTXTName, edgeTimestamp, gslb.Spec.Strategy.DNSTtlSeconds, "default")
 		if err != nil {
-			return &reconcile.Result{}, err
+			return err
 		}
 	} else {
 		p.assistant.Info("Updating split brain TXT record(%s)...", heartbeatTXTName)
 		_, err := objMgr.UpdateTXTRecord(heartbeatTXTName, edgeTimestamp)
 		if err != nil {
-			return &reconcile.Result{}, err
+			return err
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 func (p *InfobloxProvider) Finalize(gslb *k8gbv1beta1.Gslb) error {
@@ -159,7 +158,7 @@ func (p *InfobloxProvider) GslbIngressExposedIPs(gslb *k8gbv1beta1.Gslb) ([]stri
 	return p.assistant.GslbIngressExposedIPs(gslb)
 }
 
-func (p *InfobloxProvider) SaveDNSEndpoint(gslb *k8gbv1beta1.Gslb, i *externaldns.DNSEndpoint) (*reconcile.Result, error) {
+func (p *InfobloxProvider) SaveDNSEndpoint(gslb *k8gbv1beta1.Gslb, i *externaldns.DNSEndpoint) error {
 	return p.assistant.SaveDNSEndpoint(gslb.Namespace, i)
 }
 

@@ -19,7 +19,6 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/AbsaOSS/k8gb/controllers/providers/dns"
 
@@ -44,7 +43,9 @@ import (
 	k8gbv1beta1 "github.com/AbsaOSS/k8gb/api/v1beta1"
 )
 
-var log = logf.Log.WithName("controller_gslb")
+var (
+	log = logf.Log.WithName("controller_gslb")
+)
 
 // GslbReconciler reconciles a Gslb object
 type GslbReconciler struct {
@@ -72,7 +73,7 @@ const (
 func (r *GslbReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
 	log := r.Log.WithValues("gslb", req.NamespacedName)
-
+	result := NewReconcileResultHandler(*r.Config, log)
 	// Fetch the Gslb instance
 	gslb := &k8gbv1beta1.Gslb{}
 	err := r.Get(ctx, req.NamespacedName, gslb)
@@ -81,18 +82,14 @@ func (r *GslbReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			// Request object not found, could have been deleted after reconcile request.
 			// Owned objects are automatically garbage collected. For additional cleanup logic use finalizers.
 			// Return and don't requeue
-			return ctrl.Result{}, nil
+			return result.Stop()
 		}
-		// Error reading the object - requeue the request.
-		return ctrl.Result{}, err
+		return result.RequeueNowWithError(fmt.Errorf("error reading the object (%s)", err))
 	}
-
-	var result *ctrl.Result
 
 	err = r.DepResolver.ResolveGslbSpec(ctx, gslb)
 	if err != nil {
-		log.Error(err, "resolving spec.strategy")
-		return ctrl.Result{}, err
+		return result.RequeueNowWithError(fmt.Errorf("resolving spec (%s)", err))
 	}
 	// == Finalizer business ==
 
@@ -105,7 +102,7 @@ func (r *GslbReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			// finalization logic fails, don't remove the finalizer so
 			// that we can retry during the next reconciliation.
 			if err := r.finalizeGslb(gslb); err != nil {
-				return ctrl.Result{}, err
+				return result.RequeueNowWithError(err)
 			}
 
 			// Remove gslbFinalizer. Once all finalizers have been
@@ -113,62 +110,58 @@ func (r *GslbReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			gslb.SetFinalizers(remove(gslb.GetFinalizers(), gslbFinalizer))
 			err := r.Update(ctx, gslb)
 			if err != nil {
-				return ctrl.Result{}, err
+				return result.RequeueNowWithError(err)
 			}
 		}
-		return ctrl.Result{}, nil
+		return result.Stop()
 	}
 
 	// Add finalizer for this CR
 	if !contains(gslb.GetFinalizers(), gslbFinalizer) {
 		if err := r.addFinalizer(gslb); err != nil {
-			return ctrl.Result{}, err
+			return result.RequeueNowWithError(err)
 		}
 	}
 
 	// == Ingress ==========
 	ingress, err := r.gslbIngress(gslb)
 	if err != nil {
-		// Requeue the request
-		return ctrl.Result{}, err
+		return result.RequeueNowWithError(err)
 	}
 
-	result, err = r.ensureIngress(gslb, ingress)
-	if result != nil {
-		return *result, err
+	err = r.saveIngress(gslb, ingress)
+	if err != nil {
+		return result.RequeueNowWithError(err)
 	}
 
 	// == external-dns dnsendpoints CRs ==
 	dnsEndpoint, err := r.gslbDNSEndpoint(gslb)
 	if err != nil {
-		// Requeue the request
-		return ctrl.Result{}, err
+		return result.RequeueNowWithError(err)
 	}
 
-	result, err = r.DNSProvider.SaveDNSEndpoint(gslb, dnsEndpoint)
-	if result != nil {
-		return *result, err
+	err = r.DNSProvider.SaveDNSEndpoint(gslb, dnsEndpoint)
+	if err != nil {
+		return result.RequeueNowWithError(err)
 	}
 
 	// == handle delegated zone in Edge DNS
-	result, err = r.DNSProvider.CreateZoneDelegationForExternalDNS(gslb)
-	if result != nil {
-		return *result, err
+	err = r.DNSProvider.CreateZoneDelegationForExternalDNS(gslb)
+	if err != nil {
+		return result.RequeueDelayWithError(err)
 	}
 
 	// == Status =
 	err = r.updateGslbStatus(gslb)
 	if err != nil {
-		// Requeue the request
-		return ctrl.Result{}, err
+		return result.RequeueDelayWithError(err)
 	}
 
 	// == Finish ==========
 	// Everything went fine, requeue after some time to catch up
 	// with external Gslb status
 	// TODO: potentially enhance with smarter reaction to external Event
-
-	return ctrl.Result{RequeueAfter: time.Second * time.Duration(r.Config.ReconcileRequeueSeconds)}, nil
+	return result.RequeueDelay()
 }
 
 // SetupWithManager configures controller manager

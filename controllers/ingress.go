@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 func (r *GslbReconciler) gslbIngress(gslb *k8gbv1beta1.Gslb) (*v1beta1.Ingress, error) {
@@ -36,7 +35,7 @@ func (r *GslbReconciler) gslbIngress(gslb *k8gbv1beta1.Gslb) (*v1beta1.Ingress, 
 	return ingress, err
 }
 
-func (r *GslbReconciler) ensureIngress(instance *k8gbv1beta1.Gslb, i *v1beta1.Ingress) (*reconcile.Result, error) {
+func (r *GslbReconciler) saveIngress(instance *k8gbv1beta1.Gslb, i *v1beta1.Ingress) error {
 	found := &v1beta1.Ingress{}
 	err := r.Get(context.TODO(), types.NamespacedName{
 		Name:      instance.Name,
@@ -51,14 +50,14 @@ func (r *GslbReconciler) ensureIngress(instance *k8gbv1beta1.Gslb, i *v1beta1.In
 		if err != nil {
 			// Creation failed
 			log.Error(err, "Failed to create new Ingress", "Ingress.Namespace", i.Namespace, "Ingress.Name", i.Name)
-			return &reconcile.Result{}, err
+			return err
 		}
 		// Creation was successful
-		return nil, nil
+		return nil
 	} else if err != nil {
 		// Error that isn't due to the service not existing
 		log.Error(err, "Failed to get Ingress")
-		return &reconcile.Result{}, err
+		return err
 	}
 
 	// Update existing object with new spec and annotations
@@ -69,8 +68,8 @@ func (r *GslbReconciler) ensureIngress(instance *k8gbv1beta1.Gslb, i *v1beta1.In
 	if err != nil {
 		// Update failed
 		log.Error(err, "Failed to update Ingress", "Ingress.Namespace", found.Namespace, "Ingress.Name", found.Name)
-		return &reconcile.Result{}, err
+		return err
 	}
 
-	return nil, nil
+	return nil
 }

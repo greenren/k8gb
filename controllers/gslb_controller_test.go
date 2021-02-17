@@ -1020,7 +1020,7 @@ func reconcileAndUpdateGslb(t *testing.T, s testSettings) {
 
 	if !s.finalCall {
 		if res != (reconcile.Result{RequeueAfter: time.Second * 30}) {
-			t.Error("reconcile did not return Result with Requeue")
+			t.Error("reconcile did not return Result with RequeueDelayWithError")
 		}
 	}
 
